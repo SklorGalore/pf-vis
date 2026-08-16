@@ -1,0 +1,23 @@
+[package]
+name = "pf-vis"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# The glow (OpenGL) backend is enough for 2D vector drawing and pulls in far less than wgpu.
+eframe = { version = "0.36", default-features = false, features = [
+    "accesskit",
+    "default_fonts",
+    "glow",
+    "links",
+    "wayland",
+    "x11",
+] }
+egui = "0.36"
+rfd = "0.17.2"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+
+[features]
+# Renders a frame to a PNG named by EFRAME_SCREENSHOT_TO and exits; used to check the drawing.
+screenshot = ["eframe/__screenshot"]
