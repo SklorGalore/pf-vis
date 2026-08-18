@@ -178,6 +178,12 @@ impl Diagram {
         self.element_offsets.clear();
     }
 
+    /// Auto-routes a bus: sizes it to comfortably fit attached equipment and connections,
+    /// and arranges incident parallel lines with clean orthogonal offsets to prevent overlapping.
+    pub fn auto_route_bus(&mut self, net: &Network, bus: i32) {
+        layout::auto_route_bus(net, self, bus);
+    }
+
     /// Elements with every terminal placed, and not suppressed.
     ///
     /// Drawing these automatically means closing a loop between two buses already on the sheet

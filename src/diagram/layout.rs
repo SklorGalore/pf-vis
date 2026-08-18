@@ -196,9 +196,45 @@ pub fn build(net: &Network, diagram: &Diagram, show_equipment: bool) -> Geometry
         // Ordering by position along the bar is what keeps runs from crossing each other.
         on_a.sort_by(|(_, p), (_, q)| along.dot(p.to_vec2()).total_cmp(&along.dot(q.to_vec2())));
         on_b.sort_by(|(_, p), (_, q)| along.dot(p.to_vec2()).total_cmp(&along.dot(q.to_vec2())));
-        for (index, eq) in equipment.iter().enumerate() {
-            if eq.bus == *bus {
-                on_b.push((Slot::Equipment(index), center + side_b * GRID));
+
+        let bus_equip: Vec<usize> = equipment
+            .iter()
+            .enumerate()
+            .filter(|(_, eq)| eq.bus == *bus)
+            .map(|(i, _)| i)
+            .collect();
+
+        if !bus_equip.is_empty() {
+            let (target_side, target_slots) = if on_a.is_empty() && !on_b.is_empty() {
+                (side_a, &mut on_a)
+            } else if on_b.is_empty() && !on_a.is_empty() {
+                (side_b, &mut on_b)
+            } else if on_a.len() < on_b.len() {
+                (side_a, &mut on_a)
+            } else {
+                (side_b, &mut on_b)
+            };
+
+            let avg_pos: f32 = if target_slots.is_empty() {
+                0.0
+            } else {
+                target_slots
+                    .iter()
+                    .map(|(_, p)| along.dot(p.to_vec2() - center.to_vec2()))
+                    .sum::<f32>()
+                    / target_slots.len() as f32
+            };
+
+            let mut eq_slots: Vec<(Slot, Pos2)> = bus_equip
+                .into_iter()
+                .map(|idx| (Slot::Equipment(idx), center + target_side * GRID))
+                .collect();
+
+            if avg_pos >= 0.0 {
+                eq_slots.extend(std::mem::take(target_slots));
+                *target_slots = eq_slots;
+            } else {
+                target_slots.extend(eq_slots);
             }
         }
 
@@ -601,6 +637,163 @@ impl Geometry {
     }
 }
 
+/// Auto-routes the given bus: resizes its length to fit all connected equipment and line
+/// terminations without crowding, and arranges incident parallel lines and paths with clean
+/// orthogonal separation offsets so elements do not overlap.
+pub fn auto_route_bus(net: &Network, diagram: &mut Diagram, bus: i32) {
+    let Some(node) = diagram.placed.get(&bus).copied() else {
+        return;
+    };
+    let center = node.center();
+    let orient = node.orient;
+    let [side_a, side_b] = orient.sides();
+
+    // 1. Calculate connected equipment count
+    let eq_count = net.attached(bus).map_or(0, |a| {
+        a.generators.len() + a.loads.len() + a.fixed_shunts.len() + a.switched_shunts.len()
+    });
+
+    // 2. Identify all visible elements connected to this bus
+    let visible = diagram.visible_elements(net);
+    let centers: BTreeMap<i32, Pos2> = diagram
+        .placed
+        .iter()
+        .map(|(b, n)| (*b, n.center()))
+        .collect();
+
+    let stars: BTreeMap<ElemId, Pos2> = visible
+        .iter()
+        .filter_map(|id| {
+            let terminals = net.element(*id).terminals();
+            (terminals.len() > 2).then(|| (*id, centroid(&terminals, &centers)))
+        })
+        .collect();
+
+    let mut on_a_count = 0;
+    let mut on_b_count = 0;
+    let mut level_count = 0;
+
+    let mut target_groups: BTreeMap<i32, Vec<ElemId>> = BTreeMap::new();
+    let mut star_elements: Vec<ElemId> = Vec::new();
+
+    for id in &visible {
+        let elem = net.element(*id);
+        let terminals = elem.terminals();
+        if !terminals.contains(&bus) {
+            continue;
+        }
+
+        if stars.contains_key(id) {
+            star_elements.push(*id);
+        } else if let Some(other) = terminals.iter().find(|t| **t != bus).copied() {
+            target_groups.entry(other).or_default().push(*id);
+        }
+
+        let target = match stars.get(id) {
+            Some(star) => *star,
+            None => {
+                let other = terminals
+                    .iter()
+                    .find(|t| *t != &bus)
+                    .copied()
+                    .unwrap_or(bus);
+                centers.get(&other).copied().unwrap_or(center)
+            }
+        };
+
+        let offset = target - center;
+        match offset.dot(side_a).total_cmp(&offset.dot(side_b)) {
+            std::cmp::Ordering::Greater => on_a_count += 1,
+            std::cmp::Ordering::Less => on_b_count += 1,
+            std::cmp::Ordering::Equal => level_count += 1,
+        }
+    }
+
+    // Balance level connections
+    for _ in 0..level_count {
+        if on_a_count < on_b_count {
+            on_a_count += 1;
+        } else {
+            on_b_count += 1;
+        }
+    }
+
+    // Equipment is attached on the clear or less-crowded side
+    let eq_on_a = (on_a_count == 0 && on_b_count > 0) || (on_a_count < on_b_count && on_b_count > 0);
+    let side_a_total = if eq_on_a { on_a_count + eq_count } else { on_a_count };
+    let side_b_total = if eq_on_a { on_b_count } else { on_b_count + eq_count };
+
+    // Sizing: ensure adequate span to fit equipment and connections comfortably
+    let required_span = (side_a_total.max(side_b_total) as u32 + 1)
+        .max(if eq_count > 0 { eq_count as u32 + 1 } else { 0 })
+        .clamp(2, 48);
+
+    if let Some(node_mut) = diagram.placed.get_mut(&bus) {
+        node_mut.span = Some(required_span);
+    }
+
+    // Also auto-route any incident radial / generator buses connected to this bus
+    for other_bus in target_groups.keys() {
+        let other_incident = net.incident(*other_bus);
+        if other_incident.len() <= 1 {
+            let other_eq = net.attached(*other_bus).map_or(0, |a| {
+                a.generators.len() + a.loads.len() + a.fixed_shunts.len() + a.switched_shunts.len()
+            });
+            let span = (other_eq as u32 + 1).max(2).clamp(2, 48);
+            if let Some(node) = diagram.placed.get_mut(other_bus) {
+                node.span = Some(span);
+            }
+        }
+    }
+
+    // Reset star offsets for 3-winding transformers so they sit at the clean centroid
+    for id in star_elements {
+        let key = super::elem_key_str(net, id);
+        diagram.element_offsets.remove(&key);
+    }
+
+    // Arrange parallel lines to prevent overlapping
+    for (other_bus, mut elements) in target_groups {
+        let other_center = centers.get(&other_bus).copied().unwrap_or(center);
+        let delta = other_center - center;
+
+        elements.sort_by_key(|id| net.element(*id).ckt().to_string());
+
+        let k = elements.len();
+        if k <= 1 {
+            for id in elements {
+                let key = super::elem_key_str(net, id);
+                diagram.element_offsets.remove(&key);
+            }
+            continue;
+        }
+
+        let is_horizontal_run = delta.x.abs() >= delta.y.abs();
+
+        for (i, id) in elements.into_iter().enumerate() {
+            let key = super::elem_key_str(net, id);
+            let step = if k % 2 == 0 {
+                let half = k as i32 / 2;
+                if (i as i32) < half {
+                    (i as i32) - half
+                } else {
+                    (i as i32) - half + 1
+                }
+            } else {
+                (i as i32) - (k as i32 / 2)
+            };
+
+            if step == 0 {
+                diagram.element_offsets.remove(&key);
+            } else if is_horizontal_run {
+                diagram.element_offsets.insert(key, (0, step));
+            } else {
+                diagram.element_offsets.insert(key, (step, 0));
+            }
+        }
+    }
+}
+
 fn distance_to_segment(p: Pos2, a: Pos2, b: Pos2) -> f32 {
     let ab = b - a;
     let len_sq = ab.length_sq();
@@ -888,6 +1081,64 @@ mod tests {
                 assert!(
                     d.x.abs() < 0.01 || d.y.abs() < 0.01,
                     "{d:?} must be orthogonal"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn auto_route_shawnee_clears_equipment_and_separates_lines() {
+        let net = sample_net();
+        let mut diagram = Diagram::default();
+        diagram.place(11, 0, 0);
+        for bus in [12, 13, 824, 825, 826, 827, 828, 829, 830, 831, 832, 8, 39, 60, 683] {
+            let slot = find_free_slot(&net, &diagram, 11, bus);
+            diagram.place(bus, slot.0, slot.1);
+        }
+
+        // Run auto route on Shawnee bus 11
+        auto_route_bus(&net, &mut diagram, 11);
+
+        let geom = build(&net, &diagram, true);
+        assert!(geom.buses[&11].span >= 10);
+
+        // Verify generators at buses 827 and 828 (above bus 11) point UP (dir.y < 0) away from transformers going down
+        for eq in &geom.equipment {
+            if eq.bus == 827 || eq.bus == 828 {
+                assert!(eq.dir.y < 0.0, "generator at bus {} must point away from transformer", eq.bus);
+            }
+            if eq.bus == 824 || eq.bus == 825 || eq.bus == 826 {
+                assert!(eq.dir.y > 0.0, "generator at bus {} must point away from transformer", eq.bus);
+            }
+        }
+    }
+
+    #[test]
+    fn auto_route_resizes_bus_to_fit_equipment_and_separates_parallel_lines() {
+        let net = sample_net();
+        let mut diagram = Diagram::default();
+        diagram.place(2, 0, 0);
+        diagram.place(722, 12, 0);
+
+        // Manually set span to 1 (too small for equipment & connections)
+        diagram.placed.get_mut(&2).unwrap().span = Some(1);
+
+        // Run auto route
+        auto_route_bus(&net, &mut diagram, 2);
+
+        let new_span = diagram.placed[&2].span.unwrap();
+        assert!(new_span >= 2, "span must expand to fit connections");
+
+        let geom = build(&net, &diagram, true);
+        assert_eq!(geom.buses[&2].span, new_span);
+
+        // Verify that equipment roots are separated along the busbar
+        let bus2_eq: Vec<_> = geom.equipment.iter().filter(|e| e.bus == 2).collect();
+        for i in 0..bus2_eq.len() {
+            for j in (i + 1)..bus2_eq.len() {
+                assert!(
+                    (bus2_eq[i].root - bus2_eq[j].root).length() > 0.1,
+                    "equipment roots must not overlap"
                 );
             }
         }

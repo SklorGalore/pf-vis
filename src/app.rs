@@ -792,6 +792,78 @@ impl PfVisApp {
             self.selected = self.hovered;
         }
 
+        if response.secondary_clicked()
+            && let Some(Pick::Bus(bus)) = self.hovered
+        {
+            self.selected = Some(Pick::Bus(bus));
+        }
+
+        let mut auto_route_bus = None;
+        let mut rotate_bus = None;
+        let mut grow_bus = None;
+        let mut remove_bus = None;
+
+        if let Some(Pick::Bus(bus)) = self.selected {
+            response.context_menu(|ui| {
+                let bus_name = net.bus(bus).map_or("", |b| &b.name);
+                ui.label(RichText::new(format!("Bus {bus} {bus_name}")).strong());
+                ui.separator();
+
+                if ui
+                    .button("Auto route")
+                    .on_hover_text("Resize bus to fit attached equipment and arrange lines to prevent overlapping")
+                    .clicked()
+                {
+                    auto_route_bus = Some(bus);
+                    ui.close();
+                }
+
+                if ui.button("Rotate bus").clicked() {
+                    rotate_bus = Some(bus);
+                    ui.close();
+                }
+
+                if ui.button("Grow all incident").clicked() {
+                    grow_bus = Some(bus);
+                    ui.close();
+                }
+
+                ui.separator();
+                if ui.button("Remove from drawing").clicked() {
+                    remove_bus = Some(bus);
+                    ui.close();
+                }
+            });
+        }
+
+        if let Some(bus) = auto_route_bus {
+            self.diagram.auto_route_bus(net, bus);
+            self.geometry = layout::build(net, &self.diagram, self.show_equipment);
+            self.status = format!("Auto routed bus {bus}");
+        }
+        if let Some(bus) = rotate_bus
+            && let Some(node) = self.diagram.placed.get_mut(&bus)
+        {
+            node.orient = match node.orient {
+                Orientation::Horizontal => Orientation::Vertical,
+                Orientation::Vertical => Orientation::Horizontal,
+            };
+            self.geometry = layout::build(net, &self.diagram, self.show_equipment);
+        }
+        if let Some(bus) = grow_bus {
+            for (id, _) in self.diagram.growth_options(net, bus) {
+                self.diagram.grow(net, bus, id);
+            }
+            self.geometry = layout::build(net, &self.diagram, self.show_equipment);
+        }
+        if let Some(bus) = remove_bus {
+            self.diagram.remove(bus);
+            if self.selected == Some(Pick::Bus(bus)) {
+                self.selected = None;
+            }
+            self.geometry = layout::build(net, &self.diagram, self.show_equipment);
+        }
+
         render::draw(
             &painter,
             viewport,
