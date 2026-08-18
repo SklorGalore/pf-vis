@@ -81,6 +81,11 @@ pub fn draw(
     for element in &geometry.elements {
         draw_transformer(&pen, element, options);
     }
+    for element in &geometry.elements {
+        if options.selected == Some(Pick::Element(element.id)) {
+            draw_element_handle(&pen, element, options);
+        }
+    }
     for equipment in &geometry.equipment {
         draw_equipment(&pen, geometry, equipment);
     }
@@ -412,5 +417,26 @@ fn draw_bus_handles(pen: &Pen, bus: i32, geom: &BusGeom, options: &Options) {
                 pen.stroke(1.5, SELECTED),
             ));
         }
+    }
+}
+
+fn draw_element_handle(pen: &Pen, element: &ElemGeom, options: &Options) {
+    let screen_pt = pen.at(element.anchor);
+    let r = (4.5 * pen.camera.zoom).clamp(3.5, 7.0);
+    let is_hovered = options.hovered == Some(Pick::Element(element.id));
+    if is_hovered {
+        pen.painter.add(Shape::circle_filled(screen_pt, r + 1.5, SELECTED));
+        pen.painter.add(Shape::circle_stroke(
+            screen_pt,
+            r + 1.5,
+            pen.stroke(1.5, CANVAS),
+        ));
+    } else {
+        pen.painter.add(Shape::circle_filled(screen_pt, r, CANVAS));
+        pen.painter.add(Shape::circle_stroke(
+            screen_pt,
+            r,
+            pen.stroke(1.5, SELECTED),
+        ));
     }
 }

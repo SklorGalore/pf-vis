@@ -20,7 +20,7 @@ Built with [`egui`](https://github.com/emilk/egui) and [`eframe`](https://github
 * **Interactive One-Line Canvas**:
   * **Incremental Network Building**: Search for any bus in the case, place it on the sheet, and expand ("grow") the diagram along incident lines and transformers.
   * **Snapping & Grid Layout**: Busbars snap to an underlying placement grid.
-  * **Orthogonal Routing**: Transmission line routes and transformer winding symbols update dynamically.
+  * **Orthogonal Routing & Moving**: Transmission line routes and transformer winding symbols update dynamically. Drag lines and transformers to customize routes, adjust jogs, or clearly separate parallel circuits.
   * **Smooth Pan & Zoom**: Pan by dragging canvas; zoom anchored to mouse cursor position; single-click auto-fit camera framing.
   * **Bus Orientation & Length**: Rotate busbars between horizontal and vertical orientations and manually resize busbar length via endpoint drag handles on the canvas or the inspector panel.
 * **Detailed Element & Case Inspector**:

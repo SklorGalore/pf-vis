@@ -116,6 +116,19 @@ pub struct ElemKey {
     pub ckt: String,
 }
 
+impl ElemKey {
+    pub fn to_string_key(&self) -> String {
+        let prefix = if self.transformer { "x" } else { "b" };
+        let buses = self
+            .buses
+            .iter()
+            .map(|b| b.to_string())
+            .collect::<Vec<_>>()
+            .join("-");
+        format!("{prefix}:{buses}:{}", self.ckt)
+    }
+}
+
 pub fn elem_key(net: &Network, id: ElemId) -> ElemKey {
     let element = net.element(id);
     ElemKey {
@@ -125,11 +138,18 @@ pub fn elem_key(net: &Network, id: ElemId) -> ElemKey {
     }
 }
 
+pub fn elem_key_str(net: &Network, id: ElemId) -> String {
+    elem_key(net, id).to_string_key()
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Diagram {
     pub placed: BTreeMap<i32, BusNode>,
     /// Elements the user has suppressed even though both ends are on the drawing.
     pub hidden: BTreeSet<ElemKey>,
+    /// Custom route offsets (in grid units) for branches and transformers.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub element_offsets: BTreeMap<String, (i32, i32)>,
     pub camera: Camera,
 }
 
@@ -155,6 +175,7 @@ impl Diagram {
     pub fn clear(&mut self) {
         self.placed.clear();
         self.hidden.clear();
+        self.element_offsets.clear();
     }
 
     /// Elements with every terminal placed, and not suppressed.
@@ -326,6 +347,13 @@ mod tests {
         let mut diagram = Diagram::default();
         diagram.place(2, 1, -3);
         diagram.placed.get_mut(&2).unwrap().span = Some(8);
+        let key = ElemKey {
+            transformer: false,
+            buses: vec![2, 722],
+            ckt: "1".to_string(),
+        }
+        .to_string_key();
+        diagram.element_offsets.insert(key.clone(), (3, -2));
         diagram.camera.zoom = 1.75;
         let json = serde_json::to_string(&Project {
             case: PathBuf::from("case.raw"),
@@ -335,6 +363,7 @@ mod tests {
         let back: Project = serde_json::from_str(&json).unwrap();
         assert_eq!(back.diagram.placed[&2].gy, -3);
         assert_eq!(back.diagram.placed[&2].span, Some(8));
+        assert_eq!(back.diagram.element_offsets[&key], (3, -2));
         assert_eq!(back.diagram.camera.zoom, 1.75);
     }
 }

@@ -71,6 +71,7 @@ Once a bus is placed on the sheet, select it on the canvas or from the bus list.
 * **Zoom to Cursor**: Scroll the mouse wheel up or down. Zooming stays centered on your mouse pointer position.
 * **Reposition Busbar**: Click and drag a busbar on the canvas. It snaps cleanly to grid cells as you move.
 * **Resize Busbar Length**: Select a busbar on the canvas and drag the circular resize handles at either endpoint to lengthen or shorten the bar. You can also adjust the **Length** drag value in the right Inspector panel or click **Reset** to return to automatic connection-based sizing.
+* **Move Lines & Transformers**: Click and drag any transmission line or transformer on the canvas to offset its orthogonal route or star point (ideal for separating parallel circuits or customizing line paths). You can also adjust the **Offset (X/Y)** drag values in the right Inspector panel or click **Reset route** to restore default routing.
 * **Rotate Busbar**: Select a bus and click **Rotate** in the right panel to toggle its orientation between **Horizontal** and **Vertical**.
 * **Fit Camera**: Click **Fit** in the top toolbar to automatically frame all currently placed buses within view.
 * **Remove Element**: Click **Remove from drawing** in the right panel to take a bus off the drawing without deleting it from the underlying PSS/E model.

@@ -3,12 +3,12 @@
 use std::path::{Path, PathBuf};
 
 use eframe::egui;
-use egui::{Align, Color32, Layout, RichText, Sense, Vec2};
+use egui::{Align, Color32, Layout, Pos2, RichText, Sense, Vec2};
 
 use crate::diagram::layout;
 use crate::diagram::render::{self, Pick};
 use crate::diagram::style::{self, GRID, format_kv, voltage_color};
-use crate::diagram::{Diagram, Orientation, Project, elem_key};
+use crate::diagram::{Diagram, Orientation, Project, elem_key, elem_key_str};
 use crate::model::{ElemId, Element, Network};
 use crate::psse;
 
@@ -16,6 +16,7 @@ use crate::psse;
 enum Dragging {
     MoveBus { bus: i32, grab: Vec2 },
     ResizeBus { bus: i32 },
+    MoveElement { id: ElemId, grab: Vec2, default_anchor: Pos2 },
     Pan,
 }
 
@@ -385,6 +386,51 @@ impl PfVisApp {
                     }
                 }
                 ui.separator();
+                ui.label(RichText::new("Route & Position").strong());
+
+                let key = elem_key_str(net, id);
+                let current_offset = self
+                    .diagram
+                    .element_offsets
+                    .get(&key)
+                    .copied()
+                    .unwrap_or((0, 0));
+                let has_offset = self.diagram.element_offsets.contains_key(&key);
+
+                ui.horizontal(|ui| {
+                    ui.label("Offset:");
+                    let mut ox = current_offset.0;
+                    let mut oy = current_offset.1;
+                    let mut changed = false;
+                    ui.label("X:");
+                    changed |= ui
+                        .add(egui::DragValue::new(&mut ox).speed(0.1).suffix(" cells"))
+                        .changed();
+                    ui.label("Y:");
+                    changed |= ui
+                        .add(egui::DragValue::new(&mut oy).speed(0.1).suffix(" cells"))
+                        .changed();
+                    if changed {
+                        if ox == 0 && oy == 0 {
+                            self.diagram.element_offsets.remove(&key);
+                        } else {
+                            self.diagram.element_offsets.insert(key.clone(), (ox, oy));
+                        }
+                    }
+                    if has_offset {
+                        if ui
+                            .button("Reset route")
+                            .on_hover_text("Reset element route to default orthogonal path")
+                            .clicked()
+                        {
+                            self.diagram.element_offsets.remove(&key);
+                        }
+                    } else {
+                        ui.label(RichText::new("(default)").small().color(Color32::GRAY));
+                    }
+                });
+
+                ui.separator();
                 if ui.button("Hide from drawing").clicked() {
                     self.diagram.hidden.insert(elem_key(net, id));
                     self.selected = None;
@@ -644,9 +690,9 @@ impl PfVisApp {
                 Orientation::Vertical => egui::CursorIcon::ResizeVertical,
             };
             ui.ctx().set_cursor_icon(cursor);
-        } else if matches!(self.dragging, Some(Dragging::MoveBus { .. })) {
+        } else if matches!(self.dragging, Some(Dragging::MoveBus { .. } | Dragging::MoveElement { .. })) {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
-        } else if matches!(self.hovered, Some(Pick::Bus(_))) {
+        } else if matches!(self.hovered, Some(Pick::Bus(_) | Pick::Element(_))) {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
         }
 
@@ -662,6 +708,26 @@ impl PfVisApp {
                     grab: node.center() - world,
                 });
                 self.selected = Some(Pick::Bus(bus));
+            } else if let Some(Pick::Element(id)) = self.hovered {
+                let key = elem_key_str(net, id);
+                let cur_offset = self
+                    .diagram
+                    .element_offsets
+                    .get(&key)
+                    .copied()
+                    .unwrap_or((0, 0));
+                let cur_anchor = self.geometry.element_anchor(id).unwrap_or(world);
+                let default_anchor = cur_anchor
+                    - Vec2::new(
+                        cur_offset.0 as f32 * GRID,
+                        cur_offset.1 as f32 * GRID,
+                    );
+                self.dragging = Some(Dragging::MoveElement {
+                    id,
+                    grab: cur_anchor - world,
+                    default_anchor,
+                });
+                self.selected = Some(Pick::Element(id));
             } else {
                 self.dragging = Some(Dragging::Pan);
             }
@@ -688,6 +754,25 @@ impl PfVisApp {
                         let target = world + grab;
                         node.gx = (target.x / GRID).round() as i32;
                         node.gy = (target.y / GRID).round() as i32;
+                        self.geometry = layout::build(net, &self.diagram, self.show_equipment);
+                    }
+                }
+                Some(Dragging::MoveElement {
+                    id,
+                    grab,
+                    default_anchor,
+                }) => {
+                    if let Some(world) = pointer_world {
+                        let target = world + grab;
+                        let delta = target - default_anchor;
+                        let gx = (delta.x / GRID).round() as i32;
+                        let gy = (delta.y / GRID).round() as i32;
+                        let key = elem_key_str(net, id);
+                        if gx == 0 && gy == 0 {
+                            self.diagram.element_offsets.remove(&key);
+                        } else {
+                            self.diagram.element_offsets.insert(key, (gx, gy));
+                        }
                         self.geometry = layout::build(net, &self.diagram, self.show_equipment);
                     }
                 }

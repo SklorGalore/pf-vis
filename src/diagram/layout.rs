@@ -74,6 +74,7 @@ pub struct ElemGeom {
     /// Circuit identifier, drawn only where a parallel circuit makes it necessary.
     pub ckt_label: Option<String>,
     pub label_at: Pos2,
+    pub anchor: Pos2,
 }
 
 #[derive(Debug, Default)]
@@ -120,7 +121,18 @@ pub fn build(net: &Network, diagram: &Diagram, show_equipment: bool) -> Geometry
         .iter()
         .filter_map(|id| {
             let terminals = net.element(*id).terminals();
-            (terminals.len() > 2).then(|| (*id, centroid(&terminals, &centers)))
+            if terminals.len() <= 2 {
+                return None;
+            }
+            let default_star = centroid(&terminals, &centers);
+            let key = super::elem_key_str(net, *id);
+            let offset = diagram
+                .element_offsets
+                .get(&key)
+                .map_or(Vec2::ZERO, |(gx, gy)| {
+                    Vec2::new(*gx as f32 * GRID, *gy as f32 * GRID)
+                });
+            Some((*id, default_star + offset))
         })
         .collect();
 
@@ -229,7 +241,7 @@ pub fn build(net: &Network, diagram: &Diagram, show_equipment: bool) -> Geometry
         let terminals = element.terminals();
         let kv = |bus: i32| net.bus(bus).map_or(0.0, |b| b.base_kv);
 
-        let (legs, label_at) = match stars.get(&id) {
+        let (legs, label_at, anchor) = match stars.get(&id) {
             Some(star) => {
                 let legs: Vec<Leg> = terminals
                     .iter()
@@ -241,7 +253,7 @@ pub fn build(net: &Network, diagram: &Diagram, show_equipment: bool) -> Geometry
                         })
                     })
                     .collect();
-                (legs, *star)
+                (legs, *star, *star)
             }
             None => {
                 let ends: Vec<Termination> = terminals
@@ -249,7 +261,14 @@ pub fn build(net: &Network, diagram: &Diagram, show_equipment: bool) -> Geometry
                     .filter_map(|bus| terminations.get(&(*bus, Slot::Element(id))).copied())
                     .collect();
                 let [a, b] = ends.as_slice() else { continue };
-                let path = route(*a, *b);
+                let key = super::elem_key_str(net, id);
+                let offset = diagram
+                    .element_offsets
+                    .get(&key)
+                    .map_or(Vec2::ZERO, |(gx, gy)| {
+                        Vec2::new(*gx as f32 * GRID, *gy as f32 * GRID)
+                    });
+                let path = route_with_offset(*a, *b, offset);
                 let (near, far, mid, _) = split_at_midpoint(&path);
                 let (kv_a, kv_b) = (kv(terminals[0]), kv(terminals[1]));
                 // Only a change of voltage justifies breaking the run into two strokes.
@@ -270,7 +289,7 @@ pub fn build(net: &Network, diagram: &Diagram, show_equipment: bool) -> Geometry
                         },
                     ]
                 };
-                (legs, mid)
+                (legs, mid, mid)
             }
         };
         if legs.is_empty() {
@@ -286,6 +305,7 @@ pub fn build(net: &Network, diagram: &Diagram, show_equipment: bool) -> Geometry
                 .then(|| element.ckt().to_string())
                 .filter(|c| !c.is_empty()),
             label_at,
+            anchor,
             legs,
         });
     }
@@ -358,7 +378,13 @@ fn centroid(buses: &[i32], centers: &BTreeMap<i32, Pos2>) -> Pos2 {
 ///
 /// Both ends leave their bar straight for [`STUB`] before turning, which is what makes the
 /// connection read as belonging to that bus.
+#[cfg(test)]
 fn route(a: Termination, b: Termination) -> Vec<Pos2> {
+    route_with_offset(a, b, Vec2::ZERO)
+}
+
+/// An orthogonal run between two bus terminations, with an optional offset.
+fn route_with_offset(a: Termination, b: Termination, offset: Vec2) -> Vec<Pos2> {
     let a1 = a.point + a.dir * STUB;
     let b1 = b.point + b.dir * STUB;
     let vertical = |d: Vec2| d.x.abs() < 0.5;
@@ -366,17 +392,51 @@ fn route(a: Termination, b: Termination) -> Vec<Pos2> {
     let mut path = vec![a.point, a1];
     match (vertical(a.dir), vertical(b.dir)) {
         (true, true) => {
-            let mid = (a1.y + b1.y) / 2.0;
-            path.push(pos2(a1.x, mid));
-            path.push(pos2(b1.x, mid));
+            let mid_y = (a1.y + b1.y) / 2.0 + offset.y;
+            let mid_x = (a1.x + b1.x) / 2.0 + offset.x;
+            if offset.x.abs() > 0.01 {
+                path.push(pos2(a1.x, mid_y));
+                path.push(pos2(mid_x, mid_y));
+                path.push(pos2(mid_x, b1.y));
+            } else {
+                path.push(pos2(a1.x, mid_y));
+                path.push(pos2(b1.x, mid_y));
+            }
         }
         (false, false) => {
-            let mid = (a1.x + b1.x) / 2.0;
-            path.push(pos2(mid, a1.y));
-            path.push(pos2(mid, b1.y));
+            let mid_x = (a1.x + b1.x) / 2.0 + offset.x;
+            let mid_y = (a1.y + b1.y) / 2.0 + offset.y;
+            if offset.y.abs() > 0.01 {
+                path.push(pos2(mid_x, a1.y));
+                path.push(pos2(mid_x, mid_y));
+                path.push(pos2(b1.x, mid_y));
+            } else {
+                path.push(pos2(mid_x, a1.y));
+                path.push(pos2(mid_x, b1.y));
+            }
         }
-        (true, false) => path.push(pos2(b1.x, a1.y)),
-        (false, true) => path.push(pos2(a1.x, b1.y)),
+        (true, false) => {
+            let cx = b1.x + offset.x;
+            let cy = a1.y + offset.y;
+            if offset.x.abs() > 0.01 || offset.y.abs() > 0.01 {
+                path.push(pos2(a1.x, cy));
+                path.push(pos2(cx, cy));
+                path.push(pos2(cx, b1.y));
+            } else {
+                path.push(pos2(b1.x, a1.y));
+            }
+        }
+        (false, true) => {
+            let cx = a1.x + offset.x;
+            let cy = b1.y + offset.y;
+            if offset.x.abs() > 0.01 || offset.y.abs() > 0.01 {
+                path.push(pos2(cx, a1.y));
+                path.push(pos2(cx, cy));
+                path.push(pos2(b1.x, cy));
+            } else {
+                path.push(pos2(a1.x, b1.y));
+            }
+        }
     }
     path.push(b1);
     path.push(b.point);
@@ -533,6 +593,11 @@ impl Geometry {
         } else {
             None
         }
+    }
+
+    /// Central anchor position for an element (midpoint or star point).
+    pub fn element_anchor(&self, id: ElemId) -> Option<Pos2> {
+        self.elements.iter().find(|e| e.id == id).map(|e| e.anchor)
     }
 }
 
@@ -797,5 +862,34 @@ mod tests {
             geometry.hit_bus_handle(2, pos2(0.0, 0.0), 4.0),
             None
         );
+    }
+
+    #[test]
+    fn an_element_respects_custom_route_offset() {
+        let net = sample_net();
+        let mut diagram = Diagram::default();
+        diagram.place(2, 0, 0);
+        diagram.place(722, 12, 0);
+
+        let default_geom = build(&net, &diagram, false);
+        let elem_geom = &default_geom.elements[0];
+        let default_mid = elem_geom.anchor;
+
+        let key = crate::diagram::elem_key_str(&net, elem_geom.id);
+        diagram.element_offsets.insert(key, (0, 3)); // offset 3 cells in Y
+
+        let custom_geom = build(&net, &diagram, false);
+        let custom_elem = &custom_geom.elements[0];
+        assert_eq!(custom_elem.anchor.y, default_mid.y + 3.0 * GRID);
+        assert!(!custom_elem.legs.is_empty());
+        for leg in &custom_elem.legs {
+            for w in leg.points.windows(2) {
+                let d = w[1] - w[0];
+                assert!(
+                    d.x.abs() < 0.01 || d.y.abs() < 0.01,
+                    "{d:?} must be orthogonal"
+                );
+            }
+        }
     }
 }
