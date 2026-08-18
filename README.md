@@ -146,8 +146,12 @@ The application window is organized into five main functional areas:
    * **Zoom**: Scroll wheel (zooms relative to mouse pointer position).
    * **Select**: Click a busbar or transmission element to view its details.
    * **Move Bus**: Click and drag a placed busbar to snap it to a new grid cell.
+   * **Resize Busbar**: Drag the circular resize handles on either endpoint of a selected busbar.
+   * **Move Lines / Transformers**: Click and drag line runs or transformer handles to customize orthogonal routes or separate parallel circuits.
+   * **Context Menu & Auto Route**: Right-click any busbar to open its context menu and select **Auto route** to automatically size the busbar to fit equipment and cleanly separate parallel lines.
 4. **Right Panel (Inspector)**:
-   * When a **Bus** is selected: Displays nominal voltage, bus type (PV/PQ/Swing), solved voltage magnitude/angle, attached generators/loads/shunts, and connected lines/transformers.
+   * When a **Bus** is selected: Displays nominal voltage, bus type (PV/PQ/Swing), solved voltage magnitude/angle, attached generators/loads/shunts, busbar length controls with Reset, and connected lines/transformers.
+   * When an **Element** is selected: Displays branch impedance parameters, transformer tap ratios and phase angles, and orthogonal route offset drag controls ($X$/$Y$) with a **Reset route** button.
    * **Grow Drawing**: Click **Add** next to any connected line or transformer to place the adjacent bus onto the drawing sheet.
    * **Rotate**: Flip busbar orientation between horizontal and vertical.
    * **Remove**: Take the selected bus or element off the drawing.
@@ -159,7 +163,7 @@ The application window is organized into five main functional areas:
 ## File Format & Serialization
 
 ### Drawing Project (`.json`)
-Diagram project files store camera state, placed bus coordinates (`gx`, `gy`), bus orientation (`Horizontal` / `Vertical`), and hidden element keys. The structure links back to the original case file:
+Diagram project files store camera state, placed bus coordinates (`gx`, `gy`), bus orientation (`Horizontal` / `Vertical`), custom spans, line route offsets, and hidden element keys. The structure links back to the original case file:
 
 ```json
 {
@@ -167,10 +171,14 @@ Diagram project files store camera state, placed bus coordinates (`gx`, `gy`), b
   "diagram": {
     "camera": { "cx": 0.0, "cy": 0.0, "zoom": 1.0 },
     "placed": {
-      "101": { "gx": 0, "gy": 0, "orient": "Horizontal" },
-      "102": { "gx": 3, "gy": -2, "orient": "Vertical" }
+      "11": { "gx": 0, "gy": 0, "orient": "Horizontal", "span": 10 },
+      "824": { "gx": -2, "gy": 3, "orient": "Horizontal", "span": 2 }
     },
-    "hidden": []
+    "hidden": [],
+    "element_offsets": {
+      "b:2-722:1": [0, -1],
+      "b:2-722:2": [0, 1]
+    }
   }
 }
 ```

@@ -72,8 +72,8 @@ Once a bus is placed on the sheet, select it on the canvas or from the bus list.
 * **Reposition Busbar**: Click and drag a busbar on the canvas. It snaps cleanly to grid cells as you move.
 * **Resize Busbar Length**: Select a busbar on the canvas and drag the circular resize handles at either endpoint to lengthen or shorten the bar. You can also adjust the **Length** drag value in the right Inspector panel or click **Reset** to return to automatic connection-based sizing.
 * **Move Lines & Transformers**: Click and drag any transmission line or transformer on the canvas to offset its orthogonal route or star point (ideal for separating parallel circuits or customizing line paths). You can also adjust the **Offset (X/Y)** drag values in the right Inspector panel or click **Reset route** to restore default routing.
-* **Bus Right-Click Context Menu & Auto Route**: Right-click any placed bus to open its context menu:
-  * **Auto route**: Automatically resizes the busbar span to comfortably fit all connected equipment and line connections without crowding, and arranges incident parallel lines with clean orthogonal separation offsets to prevent lines and equipment from overlapping each other or themselves.
+* **Bus Right-Click Context Menu & Auto Route**: Right-click any placed busbar to open its context menu:
+  * **Auto route**: Automatically resizes the busbar span to comfortably fit all connected equipment and line connections without crowding, places attached equipment on clear/uncrossed sides of the busbar, and arranges incident parallel lines with clean orthogonal separation offsets to prevent lines and equipment from overlapping each other or themselves.
   * **Rotate bus**: Quickly toggle busbar orientation between horizontal and vertical.
   * **Grow all incident**: Expands and places all connected lines and buses onto the diagram.
   * **Remove from drawing**: Clears the busbar from the active sheet.
@@ -91,10 +91,13 @@ Selecting any component on the canvas updates the **Inspector Panel**:
   * Nominal voltage & bus classification (**PV Generator**, **PQ Load**, **Swing**, **Isolated**).
   * Solved voltage magnitude ($V_m$ in per-unit) and voltage phase angle ($V_a$ in degrees).
   * Attached equipment breakdown: Generator active/reactive output ($P_g$ MW, $Q_g$ Mvar), Load demand ($P_l$ MW, $Q_l$ Mvar), and Shunt reactive power ($Mvar$).
+  * Busbar span & length controls with **Reset** button.
 * **Line / Branch Selection**:
   * Terminal buses, circuit identifier, per-unit impedance ($R$, $X$, $B$), MVA rating A, and in-service status.
+  * Orthogonal **Route & Position** offset drag values ($X$, $Y$ in grid cells) with **Reset route** button.
 * **Transformer Selection**:
   * 2-winding or 3-winding configuration, winding tap ratios ($windv$), nominal winding voltages, phase shift angles ($ang$), and MVA ratings.
+  * Route offset and winding star point controls.
 
 ---
 
@@ -102,7 +105,24 @@ Selecting any component on the canvas updates the **Inspector Panel**:
 
 Diagram layouts are independent from raw PSS/E cases, allowing you to create multiple view sheets for the same grid model.
 
-* **Save Drawing**: Click **Save drawing…** to save a `.json` project file. The layout file stores grid coordinates, bus orientations, camera zoom, and hidden elements.
+* **Save Drawing**: Click **Save drawing…** to save a `.json` project file. The layout file stores grid coordinates, custom spans, bus orientations, line route offsets, camera zoom, and hidden elements:
+  ```json
+  {
+    "case": "MemphisCase2026_Mar7.RAW",
+    "diagram": {
+      "camera": { "cx": 0.0, "cy": 0.0, "zoom": 1.0 },
+      "placed": {
+        "11": { "gx": 0, "gy": 0, "orient": "Horizontal", "span": 10 },
+        "824": { "gx": -2, "gy": 3, "orient": "Horizontal", "span": 2 }
+      },
+      "hidden": [],
+      "element_offsets": {
+        "b:2-722:1": [0, -1],
+        "b:2-722:2": [0, 1]
+      }
+    }
+  }
+  ```
 * **Open Drawing**: Click **Open drawing…** or pass the `.json` file to `pf-vis` on startup:
   ```bash
   cargo run -- cases/sample_drawing.json
@@ -164,7 +184,11 @@ cases/MemphisCase2026_Mar7.RAW
 | **Pan Canvas** | Click & Drag empty canvas space |
 | **Zoom Viewport** | Mouse Wheel Scroll (anchored to cursor) |
 | **Select Component** | Left Click on Busbar, Branch, or Transformer |
-| **Move Busbar** | Drag Busbar (snaps to grid) |
+| **Move Busbar** | Left Click & Drag Busbar (snaps to grid) |
+| **Resize Busbar Length** | Drag circular endpoint handles on selected bus |
+| **Move Line / Transformer** | Left Click & Drag line run or transformer handle |
+| **Bus Context Menu** | Right Click any busbar on the canvas |
+| **Auto Route Bus** | Right Click Bus -> Select **Auto route** |
 | **Auto-Fit View** | Click **Fit** button in toolbar |
 | **Place New Bus** | Left Click bus name in left Case Browser |
 | **Expand Connection** | Click **Add** in right Inspector panel |

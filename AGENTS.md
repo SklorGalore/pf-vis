@@ -13,10 +13,12 @@ This document provides context, architectural reference, build/test commands, an
   - PSS/E `.RAW` parser supporting Revisions 32–35 (Buses, Branches, Transformers, Generators, Loads, Fixed/Switched Shunts).
   - Infinite vector drawing sheet with smooth pan and anchored zoom.
   - Incremental diagram building (grow network from any busbar along incident lines and transformers).
-  - Orthogonal line routing and collision-aware automatic grid placement.
+  - Orthogonal line routing, custom route moving, and collision-aware automatic grid placement.
+  - Auto-routing engine with smart equipment placement, non-overlapping spacing, and symmetric parallel circuit separation.
+  - Manual busbar length resizing with canvas endpoint handles and Inspector controls.
   - Voltage-level color coding with logarithmic ratio matching for non-standard voltages.
   - Headless CLI summary mode for batch inspection without launching the UI.
-  - Project file (`.json`) serialization preserving relative paths to case files.
+  - Project file (`.json`) serialization preserving relative paths to case files, custom spans, and route offsets.
 
 ---
 
