@@ -22,7 +22,7 @@ Built with [`egui`](https://github.com/emilk/egui) and [`eframe`](https://github
   * **Snapping & Grid Layout**: Busbars snap to an underlying placement grid.
   * **Orthogonal Routing**: Transmission line routes and transformer winding symbols update dynamically.
   * **Smooth Pan & Zoom**: Pan by dragging canvas; zoom anchored to mouse cursor position; single-click auto-fit camera framing.
-  * **Bus Orientation**: Rotate busbars between horizontal and vertical orientations.
+  * **Bus Orientation & Length**: Rotate busbars between horizontal and vertical orientations and manually resize busbar length via endpoint drag handles on the canvas or the inspector panel.
 * **Detailed Element & Case Inspector**:
   * View bus properties: solved voltage magnitude (`Vm`), phase angle (`Va`), base kV, area, zone, and bus type (PV, PQ, Swing, Isolated).
   * Inspect branch parameters ($R$, $X$, $B$, Rating A) and transformer winding configurations (tap ratios, phase angles, ratings).

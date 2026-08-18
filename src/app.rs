@@ -8,9 +8,16 @@ use egui::{Align, Color32, Layout, RichText, Sense, Vec2};
 use crate::diagram::layout;
 use crate::diagram::render::{self, Pick};
 use crate::diagram::style::{self, GRID, format_kv, voltage_color};
-use crate::diagram::{Diagram, Project, elem_key};
+use crate::diagram::{Diagram, Orientation, Project, elem_key};
 use crate::model::{ElemId, Element, Network};
 use crate::psse;
+
+#[derive(Debug, Clone, Copy)]
+enum Dragging {
+    MoveBus { bus: i32, grab: Vec2 },
+    ResizeBus { bus: i32 },
+    Pan,
+}
 
 pub struct PfVisApp {
     net: Option<Network>,
@@ -24,8 +31,8 @@ pub struct PfVisApp {
     show_grid: bool,
     show_labels: bool,
     show_equipment: bool,
-    /// Bus currently being dragged, and the grab offset in world units.
-    dragging: Option<(i32, Vec2)>,
+    dragging: Option<Dragging>,
+    geometry: layout::Geometry,
     fit_requested: bool,
 }
 
@@ -44,6 +51,7 @@ impl Default for PfVisApp {
             show_labels: true,
             show_equipment: true,
             dragging: None,
+            geometry: layout::Geometry::default(),
             fit_requested: false,
         }
     }
@@ -507,6 +515,40 @@ impl PfVisApp {
         }
 
         ui.separator();
+        ui.label(RichText::new("Bar layout").strong());
+
+        let manual_span = self.diagram.placed.get(&bus).and_then(|n| n.span);
+        let bus_geom = self.geometry.buses.get(&bus);
+        let auto_span = bus_geom.map_or(2, |g| g.auto_span);
+        let current_span = bus_geom.map_or_else(|| manual_span.unwrap_or(auto_span), |g| g.span);
+
+        ui.horizontal(|ui| {
+            ui.label("Length:");
+            let mut span_val = current_span;
+            let drag = egui::DragValue::new(&mut span_val)
+                .range(1..=48)
+                .suffix(" cells")
+                .speed(0.1);
+            if ui.add(drag).changed()
+                && let Some(node) = self.diagram.placed.get_mut(&bus)
+            {
+                node.span = Some(span_val);
+            }
+            if manual_span.is_some() {
+                if ui
+                    .button(format!("Reset ({auto_span})"))
+                    .on_hover_text("Reset length to automatic sizing based on connections")
+                    .clicked()
+                    && let Some(node) = self.diagram.placed.get_mut(&bus)
+                {
+                    node.span = None;
+                }
+            } else {
+                ui.label(RichText::new("(auto)").small().color(Color32::GRAY));
+            }
+        });
+
+        ui.separator();
         ui.horizontal(|ui| {
             if ui.button("Rotate").clicked()
                 && let Some(node) = self.diagram.placed.get_mut(&bus)
@@ -530,11 +572,10 @@ impl PfVisApp {
 
         let (response, painter) = ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
         let viewport = response.rect;
-        let geometry = layout::build(net, &self.diagram, self.show_equipment);
 
         if self.fit_requested {
             self.fit_requested = false;
-            if let Some(bounds) = geometry.bounds() {
+            if let Some(bounds) = self.geometry.bounds() {
                 self.diagram.camera.fit(bounds, viewport);
             }
         }
@@ -558,39 +599,107 @@ impl PfVisApp {
             .hover_pos()
             .map(|p| self.diagram.camera.to_world(p, viewport));
         let tolerance = 7.0 / self.diagram.camera.zoom;
+        let handle_tol = (9.0 / self.diagram.camera.zoom).max(GRID * 0.25);
+
+        let hovered_handle = match (pointer_world, self.selected) {
+            (Some(world), Some(Pick::Bus(sel_bus))) => {
+                self.geometry
+                    .hit_bus_handle(sel_bus, world, handle_tol)
+                    .map(|end| (sel_bus, end))
+            }
+            _ => None,
+        };
+
         self.hovered = pointer_world.and_then(|world| {
-            geometry
-                .hit_bus(world, tolerance.max(GRID * 0.15))
-                .map(Pick::Bus)
-                .or_else(|| geometry.hit_element(world, tolerance).map(Pick::Element))
+            if let Some((bus, _)) = hovered_handle {
+                Some(Pick::Bus(bus))
+            } else {
+                self.geometry
+                    .hit_bus(world, tolerance.max(GRID * 0.15))
+                    .map(Pick::Bus)
+                    .or_else(|| self.geometry.hit_element(world, tolerance).map(Pick::Element))
+            }
         });
 
-        if response.drag_started()
-            && let (Some(world), Some(Pick::Bus(bus))) = (pointer_world, self.hovered)
-        {
-            let node = self.diagram.placed[&bus];
-            self.dragging = Some((bus, node.center() - world));
+        // Set contextual mouse cursor
+        if let Some(Dragging::ResizeBus { bus }) = self.dragging {
+            let orient = self
+                .diagram
+                .placed
+                .get(&bus)
+                .map_or(Orientation::Horizontal, |n| n.orient);
+            let cursor = match orient {
+                Orientation::Horizontal => egui::CursorIcon::ResizeHorizontal,
+                Orientation::Vertical => egui::CursorIcon::ResizeVertical,
+            };
+            ui.ctx().set_cursor_icon(cursor);
+        } else if let Some((bus, _)) = hovered_handle {
+            let orient = self
+                .diagram
+                .placed
+                .get(&bus)
+                .map_or(Orientation::Horizontal, |n| n.orient);
+            let cursor = match orient {
+                Orientation::Horizontal => egui::CursorIcon::ResizeHorizontal,
+                Orientation::Vertical => egui::CursorIcon::ResizeVertical,
+            };
+            ui.ctx().set_cursor_icon(cursor);
+        } else if matches!(self.dragging, Some(Dragging::MoveBus { .. })) {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+        } else if matches!(self.hovered, Some(Pick::Bus(_))) {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
         }
+
+        if response.drag_started()
+            && let Some(world) = pointer_world
+        {
+            if let Some((bus, _end)) = hovered_handle {
+                self.dragging = Some(Dragging::ResizeBus { bus });
+            } else if let Some(Pick::Bus(bus)) = self.hovered {
+                let node = self.diagram.placed[&bus];
+                self.dragging = Some(Dragging::MoveBus {
+                    bus,
+                    grab: node.center() - world,
+                });
+                self.selected = Some(Pick::Bus(bus));
+            } else {
+                self.dragging = Some(Dragging::Pan);
+            }
+        }
+
         if response.dragged() {
             match self.dragging {
-                // Dragging a bus moves it, snapped to the grid it was placed on.
-                Some((bus, grab)) => {
+                Some(Dragging::ResizeBus { bus }) => {
+                    if let (Some(world), Some(node)) =
+                        (pointer_world, self.diagram.placed.get_mut(&bus))
+                    {
+                        let center = node.center();
+                        let along = node.orient.along();
+                        let dist = (world - center).dot(along).abs();
+                        let span = ((dist / GRID) * 2.0).round().clamp(1.0, 48.0) as u32;
+                        node.span = Some(span);
+                        self.geometry = layout::build(net, &self.diagram, self.show_equipment);
+                    }
+                }
+                Some(Dragging::MoveBus { bus, grab }) => {
                     if let (Some(world), Some(node)) =
                         (pointer_world, self.diagram.placed.get_mut(&bus))
                     {
                         let target = world + grab;
                         node.gx = (target.x / GRID).round() as i32;
                         node.gy = (target.y / GRID).round() as i32;
+                        self.geometry = layout::build(net, &self.diagram, self.show_equipment);
                     }
                 }
-                // Dragging anywhere else pans the sheet.
-                None => {
+                Some(Dragging::Pan) => {
                     let delta = response.drag_delta() / self.diagram.camera.zoom;
                     self.diagram.camera.cx -= delta.x;
                     self.diagram.camera.cy -= delta.y;
                 }
+                None => {}
             }
         }
+
         if response.drag_stopped() {
             self.dragging = None;
         }
@@ -603,12 +712,13 @@ impl PfVisApp {
             viewport,
             self.diagram.camera,
             net,
-            &geometry,
+            &self.geometry,
             &render::Options {
                 show_grid: self.show_grid,
                 show_labels: self.show_labels,
                 selected: self.selected,
                 hovered: self.hovered,
+                hovered_handle,
             },
         );
     }
@@ -616,6 +726,9 @@ impl PfVisApp {
 
 impl eframe::App for PfVisApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        if let Some(net) = &self.net {
+            self.geometry = layout::build(net, &self.diagram, self.show_equipment);
+        }
         egui::Panel::top("toolbar").show(ui, |ui| self.toolbar(ui));
         egui::Panel::bottom("status").show(ui, |ui| {
             ui.horizontal(|ui| {

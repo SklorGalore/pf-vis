@@ -7,7 +7,7 @@
 
 use egui::{Align2, Color32, FontId, Painter, Pos2, Rect, Shape, Stroke, Vec2, pos2};
 
-use super::layout::{ElemGeom, EquipGeom, EquipKind, Geometry, Symbol};
+use super::layout::{BusEnd, BusGeom, ElemGeom, EquipGeom, EquipKind, Geometry, Symbol};
 use super::style::*;
 use super::{Camera, Orientation};
 use crate::model::{ElemId, Network};
@@ -24,6 +24,7 @@ pub struct Options {
     pub show_labels: bool,
     pub selected: Option<Pick>,
     pub hovered: Option<Pick>,
+    pub hovered_handle: Option<(i32, BusEnd)>,
 }
 
 /// Maps world coordinates onto the screen and keeps line weights sane at any zoom.
@@ -96,6 +97,9 @@ pub fn draw(
             [pen.at(geom.a), pen.at(geom.b)],
             pen.stroke(BUS_WIDTH, color),
         );
+        if options.selected == Some(Pick::Bus(*bus)) {
+            draw_bus_handles(&pen, *bus, geom, options);
+        }
     }
 
     if options.show_labels && camera.zoom > 0.35 {
@@ -386,4 +390,27 @@ fn draw_bus_label(pen: &Pen, net: &Network, bus: i32, geom: &super::layout::BusG
         FontId::proportional(size * 0.85),
         LABEL,
     );
+}
+
+fn draw_bus_handles(pen: &Pen, bus: i32, geom: &BusGeom, options: &Options) {
+    let r = (4.5 * pen.camera.zoom).clamp(3.5, 7.0);
+    for (end, pt) in [(BusEnd::A, geom.a), (BusEnd::B, geom.b)] {
+        let is_hovered = options.hovered_handle == Some((bus, end));
+        let screen_pt = pen.at(pt);
+        if is_hovered {
+            pen.painter.add(Shape::circle_filled(screen_pt, r + 1.5, SELECTED));
+            pen.painter.add(Shape::circle_stroke(
+                screen_pt,
+                r + 1.5,
+                pen.stroke(1.5, CANVAS),
+            ));
+        } else {
+            pen.painter.add(Shape::circle_filled(screen_pt, r, CANVAS));
+            pen.painter.add(Shape::circle_stroke(
+                screen_pt,
+                r,
+                pen.stroke(1.5, SELECTED),
+            ));
+        }
+    }
 }

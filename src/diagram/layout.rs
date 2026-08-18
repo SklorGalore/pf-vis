@@ -13,6 +13,12 @@ use super::style::{GEN_LEAD, GEN_RADIUS, GRID, STUB, WINDING_RADIUS};
 use super::{Diagram, Orientation};
 use crate::model::{ElemId, Element, Network};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BusEnd {
+    A,
+    B,
+}
+
 /// A bus bar: where it sits and how far it runs.
 #[derive(Debug, Clone, Copy)]
 pub struct BusGeom {
@@ -20,6 +26,8 @@ pub struct BusGeom {
     pub b: Pos2,
     pub orient: Orientation,
     pub base_kv: f64,
+    pub span: u32,
+    pub auto_span: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -182,13 +190,16 @@ pub fn build(net: &Network, diagram: &Diagram, show_equipment: bool) -> Geometry
             }
         }
 
-        let span = (on_a.len().max(on_b.len()) as f32 + 1.0).clamp(2.0, 24.0);
-        let length = span * GRID;
+        let auto_span = (on_a.len().max(on_b.len()) as f32 + 1.0).clamp(2.0, 24.0) as u32;
+        let span = node.span.unwrap_or(auto_span).clamp(1, 100);
+        let length = span as f32 * GRID;
         let geom = BusGeom {
             a: center - along * length / 2.0,
             b: center + along * length / 2.0,
             orient,
             base_kv: net.bus(*bus).map_or(0.0, |b| b.base_kv),
+            span,
+            auto_span,
         };
         geometry.buses.insert(*bus, geom);
 
@@ -511,6 +522,18 @@ impl Geometry {
             .min_by(|(_, a), (_, b)| a.total_cmp(b))
             .map(|(id, _)| id)
     }
+
+    /// Checks if `world` hits a resize handle of the given bus within `tol`.
+    pub fn hit_bus_handle(&self, bus: i32, world: Pos2, tol: f32) -> Option<BusEnd> {
+        let geom = self.buses.get(&bus)?;
+        if (world - geom.a).length() <= tol {
+            Some(BusEnd::A)
+        } else if (world - geom.b).length() <= tol {
+            Some(BusEnd::B)
+        } else {
+            None
+        }
+    }
 }
 
 fn distance_to_segment(p: Pos2, a: Pos2, b: Pos2) -> f32 {
@@ -537,6 +560,7 @@ pub fn find_free_slot(net: &Network, diagram: &Diagram, from: i32, new_bus: i32)
             gx: 0,
             gy: 0,
             orient: Orientation::Horizontal,
+            span: None,
         });
     let kv = |bus: i32| net.bus(bus).map_or(0.0, |b| b.base_kv);
     let (parent_kv, new_kv) = (kv(from), kv(new_bus));
@@ -740,5 +764,38 @@ mod tests {
         assert_eq!(geometry.hit_bus(pos2(0.0, 3.0 * GRID), 4.0), None);
         let run = &geometry.elements[0].legs[0].points;
         assert!(geometry.hit_element(run[1], 4.0).is_some());
+    }
+
+    #[test]
+    fn a_bus_bar_respects_manual_span() {
+        let net = sample_net();
+        let mut diagram = Diagram::default();
+        diagram.place(2, 0, 0);
+        let default_geom = build(&net, &diagram, false).buses[&2];
+        assert_eq!(default_geom.span, default_geom.auto_span);
+
+        // Manually set span to 8 cells
+        diagram.placed.get_mut(&2).unwrap().span = Some(8);
+        let custom_geom = build(&net, &diagram, false).buses[&2];
+        assert_eq!(custom_geom.span, 8);
+        assert_eq!((custom_geom.b - custom_geom.a).length(), 8.0 * GRID);
+        assert_eq!(custom_geom.a, pos2(-4.0 * GRID, 0.0));
+        assert_eq!(custom_geom.b, pos2(4.0 * GRID, 0.0));
+
+        // Test handle hit testing
+        assert_eq!(custom_geom.auto_span, default_geom.auto_span);
+        let geometry = build(&net, &diagram, false);
+        assert_eq!(
+            geometry.hit_bus_handle(2, pos2(-4.0 * GRID, 0.0), 4.0),
+            Some(BusEnd::A)
+        );
+        assert_eq!(
+            geometry.hit_bus_handle(2, pos2(4.0 * GRID, 0.0), 4.0),
+            Some(BusEnd::B)
+        );
+        assert_eq!(
+            geometry.hit_bus_handle(2, pos2(0.0, 0.0), 4.0),
+            None
+        );
     }
 }

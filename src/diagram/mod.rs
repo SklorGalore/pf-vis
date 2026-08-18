@@ -49,12 +49,14 @@ impl Orientation {
 }
 
 /// A bus on the drawing, positioned in whole grid cells.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BusNode {
     pub gx: i32,
     pub gy: i32,
     #[serde(default)]
     pub orient: Orientation,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub span: Option<u32>,
 }
 
 impl BusNode {
@@ -141,6 +143,7 @@ impl Diagram {
             gx,
             gy,
             orient: Orientation::Horizontal,
+            span: None,
         });
     }
 
@@ -322,6 +325,7 @@ mod tests {
     fn a_project_round_trips_through_json() {
         let mut diagram = Diagram::default();
         diagram.place(2, 1, -3);
+        diagram.placed.get_mut(&2).unwrap().span = Some(8);
         diagram.camera.zoom = 1.75;
         let json = serde_json::to_string(&Project {
             case: PathBuf::from("case.raw"),
@@ -330,6 +334,7 @@ mod tests {
         .unwrap();
         let back: Project = serde_json::from_str(&json).unwrap();
         assert_eq!(back.diagram.placed[&2].gy, -3);
+        assert_eq!(back.diagram.placed[&2].span, Some(8));
         assert_eq!(back.diagram.camera.zoom, 1.75);
     }
 }
