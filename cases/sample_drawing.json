@@ -1,0 +1,68 @@
+{
+  "case": "MemphisCase2026_Mar7.RAW",
+  "diagram": {
+    "placed": {
+      "2": {
+        "gx": 0,
+        "gy": 0,
+        "orient": "Horizontal"
+      },
+      "3": {
+        "gx": 0,
+        "gy": 5,
+        "orient": "Horizontal"
+      },
+      "269": {
+        "gx": 8,
+        "gy": 5,
+        "orient": "Horizontal"
+      },
+      "343": {
+        "gx": 11,
+        "gy": 8,
+        "orient": "Horizontal"
+      },
+      "525": {
+        "gx": 16,
+        "gy": 0,
+        "orient": "Horizontal"
+      },
+      "577": {
+        "gx": 2,
+        "gy": 11,
+        "orient": "Horizontal"
+      },
+      "722": {
+        "gx": 8,
+        "gy": 0,
+        "orient": "Horizontal"
+      },
+      "723": {
+        "gx": 9,
+        "gy": 11,
+        "orient": "Horizontal"
+      },
+      "787": {
+        "gx": 13,
+        "gy": -3,
+        "orient": "Horizontal"
+      },
+      "808": {
+        "gx": -3,
+        "gy": 8,
+        "orient": "Horizontal"
+      },
+      "809": {
+        "gx": 4,
+        "gy": 8,
+        "orient": "Horizontal"
+      }
+    },
+    "hidden": [],
+    "camera": {
+      "cx": 0.0,
+      "cy": 0.0,
+      "zoom": 1.0
+    }
+  }
+}
